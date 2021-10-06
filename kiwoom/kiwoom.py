@@ -1,6 +1,7 @@
 from PyQt5.QAxContainer import *
 from PyQt5.QtCore import *
 from config.error_code import *
+from PyQt5.QtTest import *
 import json
 
 
@@ -13,6 +14,8 @@ class Kiwoom(QAxWidget):
         # event loop 모음
         self.login_event_loop = None
         self.detail_account_info_event_loop = QEventLoop()
+        self.calculator_event_loop = QEventLoop()
+
 
         #
 
@@ -20,6 +23,7 @@ class Kiwoom(QAxWidget):
         self.account_num = None
         self.account_stock_dict = {}
         self.unsigned_order_dict = {}
+        self.calcul_data = []
         #
 
         # 계좌 관련 변수 모음
@@ -35,13 +39,13 @@ class Kiwoom(QAxWidget):
         self.get_oci_instance()
         self.event_slots()
 
-        self.signal_login_com_connect() # 자동 아이디 로그인
-        self.get_account_info() # 계좌 번호 알아보기
-        self.detail_account_info() # 예수금 정보 요청
-        self.detail_account_mystock() # 계좌평가 잔고 내역 요청
-        self.unsigned_order() # 미체결 내역 요청
+        self.signal_login_com_connect()  # 자동 아이디 로그인
+        self.get_account_info()  # 계좌 번호 알아보기
+        self.detail_account_info()  # 예수금 정보 요청
+        self.detail_account_mystock()  # 계좌평가 잔고 내역 요청
+        self.unsigned_order()  # 미체결 내역 요청
 
-        self.calculator_fnc() # 종목분석용//
+        self.calculator_fnc()  # 종목분석용//
 
     # OCI 가져오기
     def get_oci_instance(self):
@@ -81,7 +85,7 @@ class Kiwoom(QAxWidget):
         self.detail_account_info_event_loop.exec_()
 
     # 시장종목 코드리스트 조회
-    def get_code_list_by_marget(self, market_code):
+    def get_code_list_by_market(self, market_code):
         code_list = self.dynamicCall("GetCodeListByMarket(str)", market_code).split(';')[:-1]
         return code_list
 
@@ -106,9 +110,21 @@ class Kiwoom(QAxWidget):
 
         self.detail_account_info_event_loop.exec_()
 
-    # 일봉 데이터 조회
+    # 종목분석 실행용 함수
+    def calculator_fnc(self):
+        code_list = self.get_code_list_by_market("10")
+
+        for idx, code in enumerate(code_list):
+            self.dynamicCall("DisconnectRealData(string)", self.scr_calculation_stock)
+
+            print(f"{idx+1}/{len(code_list)} : KOSDAQ Stock Code : {code} is updating...")
+
+            self.day_graph(code=code)
+
+    # 일봉 데이터 조회 - 600일치의 데이터를 받을 수 있다.
     def day_graph(self, code=None, date=None, sPrevNext="0"):
-        print("일봉 데이터")
+        QTest.qWait(3600)
+
         self.dynamicCall("SetInputValue(str, str)", "종목코드", code)
         if date is not None:
             self.dynamicCall("SetInputValue(str, str)", "기준일자", date)
@@ -116,16 +132,7 @@ class Kiwoom(QAxWidget):
 
         self.dynamicCall("CommRqData(str, str, int, str)", "주식일봉차트조회", "opt10081", sPrevNext, self.scr_calculation_stock)
 
-    # 종목분석 실행용 함수
-    def calculator_fnc(self):
-        code_list = self.get_code_list_by_marget("10")
-
-        for idx, code in enumerate(code_list):
-            self.dynamicCall("DisconnectRealData(string)", self.scr_calculation_stock)
-
-            print(f"{idx+1}/{len(len(code_list))} : KOSDAQ Stock Code : {code} is updating...")
-
-            self.day_graph(code)
+        self.calculator_event_loop.exec_()
 
     # TR 데이터 슬롯
     def trdata_slot(self, sScrNo, sRQName, sTrCode, sRecordName, sPrevNext):
@@ -232,5 +239,109 @@ class Kiwoom(QAxWidget):
 
             self.detail_account_info_event_loop.exit()
 
-        elif "주식일봉차트조회" == sRQName
+        elif sRQName == "주식일봉차트조회":
+            code = self.dynamicCall("GetCommData(str, str, int, str)", sTrCode, sRQName, 0, "종목코드").strip()
+            print(f"코드번호 : {code} 일봉데이터조회...")
+
+            cnt = self.dynamicCall("GetRepeatCnt(string,string", sTrCode, sRQName)
+            print(f'남은 일수 : {cnt}')
+            # data = ['', 현재가, 거래량, 거래대금, 날짜, 시가, 고가, 저가, '']
+            for i in range(cnt):
+                data = []
+
+                price = self.dynamicCall("GetCommData(str, str, int, str)", sTrCode, sRQName, i, "현재가").strip()
+                value = self.dynamicCall("GetCommData(str, str, int, str)", sTrCode, sRQName, i, "거래량").strip()
+                transaction_amount = self.dynamicCall("GetCommData(str, str, int, str)", sTrCode, sRQName, i, "거래대금").strip()
+                date = self.dynamicCall("GetCommData(str, str, int, str)", sTrCode, sRQName, i, "일자").strip()
+                init_price = self.dynamicCall("GetCommData(str, str, int, str)", sTrCode, sRQName, i, "시가").strip()
+                high_price = self.dynamicCall("GetCommData(str, str, int, str)", sTrCode, sRQName, i, "고가").strip()
+                low_price = self.dynamicCall("GetCommData(str, str, int, str)", sTrCode, sRQName, i, "저가").strip()
+
+                data.append("")
+                data.append(price)
+                data.append(value)
+                data.append(transaction_amount)
+                data.append(date)
+                data.append(init_price)
+                data.append(high_price)
+                data.append(low_price)
+                data.append("")
+
+                self.calcul_data.append(data.copy())
+
+            if sPrevNext == "2":
+                self.day_graph(code=code, sPrevNext=sPrevNext)
+            else:
+                print(f"총 일수 {len(self.calcul_data)}")
+
+                pass_success = False
+
+                # 120일 이평선 확인하기
+                if self.calcul_data is None or len(self.calcul_data) < 120:
+                    pass_success = False
+                else:
+                    total_price = 0
+                    for value in self.calcul_data[:120]:
+                        total_price += int(value[1])
+
+                    quarter_moving_average_price = total_price / 120
+
+                    # 저가 <= 120이평선 & 고가 <= 120이평선 조건 확인
+                    bottom_price = False
+                    check_price = None
+                    if int(self.calcul_data[0][7]) <= quarter_moving_average_price <= int(self.calcul_data[0][6]):
+                        bottom_price = True
+                        check_price = int(self.calcul_data[0][6])
+
+                    prev_price = None
+                    if bottom_price:
+                        quarter_moving_average_price = 0
+                        price_top_moving = False
+
+                        idx = 1
+                        while True:
+                            if len(self.calcul_data[idx:]) < 120:   # 120일치가 있는지 계속 확인
+                                print("120일치의 데이터가 없음")
+                                break
+
+                            total_price = 0
+                            for value in self.calcul_data[idx:120+idx]:
+                                total_price += int(value[1])
+                            quarter_moving_average_price_prev = total_price / 120
+
+                            if quarter_moving_average_price_prev <= int(self.calcul_data[idx][6]) and idx <= 20:
+                                print("20일 동안 주가가 120일 이평선과 같거나 위에 있으면 조건 불충분")
+                                price_top_moving = False
+                                break
+
+                            elif int(self.calcul_data[idx][7]) > quarter_moving_average_price_prev and idx > 20:
+                                print("일봉이 120이평선 위로 확인됨")
+                                price_top_moving = True
+                                prev_price = int(self.calcul_data[idx][7])
+                                break
+
+                            idx += 1
+
+                        # 이평선이 가장 최근 일자 이평선의 가격보다 낮은지 확인하기
+                        if price_top_moving is True:
+                            if quarter_moving_average_price > quarter_moving_average_price_prev and check_price > prev_price:
+                                print("포착된 이평선의 가격이 오늘자 이평선 가격보다 낮은 것 확인됨")
+                                print("포착된 일봉 저가가 금일 일봉 고가보다 낮은 것 확인됨")
+                                pass_success = True
+
+                if pass_success:
+                    print("조건부 통과됨")
+
+                    code_nm = self.dynamicCall("GetMasterCodeName(QString)", code)
+
+                    f = open("files/condition_stock.txt", "a", encoding="utf8")
+                    f.write(f"{code}\t{code_nm}\t{str(self.calcul_data[0][1])}\n")
+                    f.close()
+
+                else:
+                    print("조건부 통과 못함")
+
+                self.calcul_data.clear()
+                self.calculator_event_loop.exit()
+
 
