@@ -1,4 +1,10 @@
 # Stock-Auto-Trader
+## About the Project
+```
+키움 API와 python을 활용한 자동 주식거래 프로그램
+자제적인 종목분석 알고리즘을 통해 주가 분석 후 자동매매
+
+```
 
 ## Woking Progress
 ```
